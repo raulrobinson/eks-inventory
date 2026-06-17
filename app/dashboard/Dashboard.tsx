@@ -17,9 +17,18 @@ import {
   Cloud, RefreshCw, LogOut, AlertTriangle, CheckCircle, Server,
   Layers, Table2, Settings, Bell, Plus, Trash2, Edit3, ChevronDown,
   ChevronRight, Globe, RotateCcw, X, Search, ChevronsUpDown,
-  ChevronUp, Cpu, Box, Clock, Activity, Filter,
+  ChevronUp, Cpu, Box, Clock, Activity, Filter, FileDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  buildPodExportRows,
+  DEFAULT_POD_EXPORT_COLUMNS,
+  exportPodsToCsv,
+  exportPodsToPdf,
+  POD_EXPORT_COLUMNS,
+  type PodExportColumn,
+  type PodExportPhaseFilter,
+} from "@/lib/pod-export";
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 
@@ -147,6 +156,9 @@ function InventoryTable({ data }: { data: ServiceInventory[] }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "name", dir: "asc" });
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<ServiceInventory | null>(null);
+  const [exportPhase, setExportPhase] = useState<PodExportPhaseFilter>("ALL");
+  const [onlyProblematicPods, setOnlyProblematicPods] = useState(false);
+  const [exportColumns, setExportColumns] = useState<PodExportColumn[]>([...DEFAULT_POD_EXPORT_COLUMNS]);
   const PAGE = 20;
 
   const namespaces = useMemo(() => ["ALL", ...Array.from(new Set(data.map(d => d.namespace))).sort()], [data]);
@@ -171,6 +183,25 @@ function InventoryTable({ data }: { data: ServiceInventory[] }) {
 
   const paginated = filtered.slice(page * PAGE, (page + 1) * PAGE);
   const totalPages = Math.ceil(filtered.length / PAGE);
+  const exportRows = useMemo(() => buildPodExportRows(filtered, {
+    phase: exportPhase,
+    onlyProblematic: onlyProblematicPods,
+  }), [filtered, exportPhase, onlyProblematicPods]);
+
+  function getExportFileName(ext: "csv" | "pdf"): string {
+    const stamp = new Date().toISOString().replace(/[.:]/g, "-");
+    return `pods-export-${stamp}.${ext}`;
+  }
+
+  function toggleExportColumn(column: PodExportColumn) {
+    setExportColumns((prev) => {
+      if (prev.includes(column)) {
+        if (prev.length === 1) return prev;
+        return prev.filter((c) => c !== column);
+      }
+      return [...prev, column];
+    });
+  }
 
   function toggleSort(key: SortKey) {
     setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
@@ -212,6 +243,68 @@ function InventoryTable({ data }: { data: ServiceInventory[] }) {
           <SelectContent>{clusters.map(c => <SelectItem key={c} value={c}>{c === "ALL" ? "All clusters" : c}</SelectItem>)}</SelectContent>
         </Select>
         <span className="text-xs text-slate-400 ml-auto">{filtered.length}/{data.length} services</span>
+      </div>
+
+      {/* Export filters */}
+      <div className="flex flex-wrap gap-2 items-center rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+        <div className="flex items-center gap-2 text-xs text-slate-500 mr-1">
+          <FileDown className="h-3.5 w-3.5" />
+          <span className="font-medium">Pod export</span>
+        </div>
+        <Select value={exportPhase} onValueChange={(v) => setExportPhase(v as PodExportPhaseFilter)}>
+          <SelectTrigger className="h-8 w-[170px] text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {[
+              { value: "ALL", label: "All phases" },
+              { value: "Running", label: "Running" },
+              { value: "Pending", label: "Pending" },
+              { value: "Succeeded", label: "Succeeded" },
+              { value: "Failed", label: "Failed" },
+              { value: "Unknown", label: "Unknown" },
+            ].map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <label className="inline-flex items-center gap-2 text-xs text-slate-600">
+          <Switch checked={onlyProblematicPods} onCheckedChange={setOnlyProblematicPods} />
+          Only problematic pods
+        </label>
+        <div className="flex flex-wrap items-center gap-2 w-full text-xs text-slate-600">
+          <span className="font-medium text-slate-500">Columns:</span>
+          {POD_EXPORT_COLUMNS.map((column) => (
+            <label key={column.key} className="inline-flex items-center gap-1.5 rounded border border-slate-200 bg-white px-2 py-1">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5"
+                checked={exportColumns.includes(column.key)}
+                onChange={() => toggleExportColumn(column.key)}
+              />
+              {column.label}
+            </label>
+          ))}
+        </div>
+        <span className="text-xs text-slate-500 ml-auto">{exportRows.length} pod{exportRows.length !== 1 ? "s" : ""} to export</span>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => exportPodsToCsv(exportRows, getExportFileName("csv"), exportColumns)}
+          disabled={exportRows.length === 0 || exportColumns.length === 0}
+        >
+          <FileDown className="h-3.5 w-3.5" />
+          CSV
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => exportPodsToPdf(exportRows, getExportFileName("pdf"), exportColumns)}
+          disabled={exportRows.length === 0 || exportColumns.length === 0}
+        >
+          <FileDown className="h-3.5 w-3.5" />
+          PDF
+        </Button>
       </div>
 
       {/* Table */}
